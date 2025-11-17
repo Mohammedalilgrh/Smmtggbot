@@ -930,8 +930,8 @@ class SMMBot:
             logger.error(f"Send to channel error: {e}")
             return False
 
-def run_bot():
-    """Run the SMM bot"""
+async def main():
+    """Main async function to run the bot"""
     try:
         # Start keep-alive server first
         keep_alive()
@@ -939,8 +939,10 @@ def run_bot():
         
         smm_bot = SMMBot()
         
+        # Create application
         application = Application.builder().token(BOT_TOKEN).build()
         
+        # Add conversation handler
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler('start', smm_bot.start)],
             states={
@@ -962,14 +964,13 @@ def run_bot():
                 ],
                 BULK_POSTS: [
                     MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, smm_bot.handle_bulk_media),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: MAIN_MENU)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: asyncio.sleep(0) or MAIN_MENU)
                 ],
                 POSTS_PER_DAY: [
                     CallbackQueryHandler(smm_bot.handle_ppd_callback, pattern="^ppd_")
                 ]
             },
             fallbacks=[CommandHandler('start', smm_bot.start)],
-            allow_reentry=True
         )
         
         application.add_handler(conv_handler)
@@ -980,7 +981,8 @@ def run_bot():
         print("🔗 Keep-alive server: http://0.0.0.0:8080")
         print("🌐 Render URL: https://smmtggbot.onrender.com")
         
-        application.run_polling(drop_pending_updates=True)
+        # Start the bot
+        await application.run_polling()
         
     except Exception as e:
         print(f"❌ Bot error: {e}")
@@ -996,4 +998,5 @@ if __name__ == '__main__':
     print("🏥 Health Check: https://smmtggbot.onrender.com/health")
     print("=" * 60)
     
-    run_bot()
+    # Run the bot
+    asyncio.run(main())
