@@ -11,6 +11,11 @@ from apscheduler.triggers.cron import CronTrigger
 import requests
 from typing import Dict, List
 
+# Flask keep-alive server
+from flask import Flask
+from threading import Thread
+import time
+
 # Set up logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -18,11 +23,62 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Your bot token
+BOT_TOKEN = "8217960293:AAEedCXGMiAHIQavwd-jpFJZqpXvRXBqCLA"
+
 # Conversation states
 MAIN_MENU, SETUP_BOT, SETUP_CHANNELS, BULK_POSTS, POSTS_PER_DAY = range(5)
 
-# Your bot token
-BOT_TOKEN = "8217960293:AAEedCXGMiAHIQavwd-jpFJZqpXvRXBqCLA"
+# Flask Keep-Alive Server
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "🤖 SMM Auto-Post Master is Alive! 🚀"
+
+@app.route('/health')
+def health():
+    return {"status": "running", "bot": "SMM Auto-Post", "timestamp": time.time()}
+
+@app.route('/ping')
+def ping():
+    return "pong"
+
+@app.route('/status')
+def status():
+    return {
+        "status": "active",
+        "service": "Telegram SMM Bot",
+        "uptime": time.time(),
+        "features": ["Auto-posting", "Multi-channel", "Bulk upload", "Repost mode"]
+    }
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    """Start the keep-alive server"""
+    server = Thread(target=run_flask)
+    server.daemon = True
+    server.start()
+    print("🔄 Keep-alive server started on port 8080")
+
+# Self-pinging function
+def start_self_ping():
+    """Background thread to ping ourselves"""
+    def ping_loop():
+        while True:
+            try:
+                # Ping our own health endpoint
+                requests.get("https://your-app-name.onrender.com/health", timeout=10)
+                print(f"✅ Self-ping at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            except Exception as e:
+                print(f"⚠️ Self-ping failed: {e}")
+            time.sleep(300)  # 5 minutes
+    
+    ping_thread = Thread(target=ping_loop, daemon=True)
+    ping_thread.start()
+    print("🔄 Self-pinging system started")
 
 class SMMBot:
     def __init__(self):
@@ -878,6 +934,10 @@ class SMMBot:
 def run_bot():
     """Run the SMM bot"""
     try:
+        # Start keep-alive server first
+        keep_alive()
+        start_self_ping()
+        
         smm_bot = SMMBot()
         
         application = Application.builder().token(BOT_TOKEN).build()
@@ -918,6 +978,7 @@ def run_bot():
         print("🤖 SMM Auto-Post Master Starting...")
         print("✅ Bot is running with your token!")
         print("🚀 Users can setup once and run forever!")
+        print("🔗 Keep-alive server: http://0.0.0.0:8080")
         
         application.run_polling(drop_pending_updates=True)
         
@@ -932,6 +993,7 @@ if __name__ == '__main__':
     print("📢 Multi-Channel Auto-Posting")
     print("🔄 Repost Mode - Infinite Loop")
     print("🎯 Complete Hands-Free Operation")
+    print("🏥 Health Check: /health on port 8080")
     print("=" * 60)
     
     run_bot()
