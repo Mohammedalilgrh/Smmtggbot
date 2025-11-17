@@ -9,7 +9,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import requests
-from typing import Dict, List
 
 # Flask keep-alive server
 from flask import Flask
@@ -70,7 +69,7 @@ def start_self_ping():
         while True:
             try:
                 # Ping our own health endpoint
-                requests.get("https://your-app-name.onrender.com/health", timeout=10)
+                requests.get("https://smmtggbot.onrender.com/health", timeout=10)
                 print(f"✅ Self-ping at {time.strftime('%Y-%m-%d %H:%M:%S')}")
             except Exception as e:
                 print(f"⚠️ Self-ping failed: {e}")
@@ -119,9 +118,9 @@ class SMMBot:
                 content_type TEXT,
                 file_id TEXT,
                 caption TEXT,
-                status TEXT DEFAULT 'pending', -- pending, posted
+                status TEXT DEFAULT 'pending',
                 posted_at DATETIME,
-                target_channels TEXT, -- JSON array of channel IDs
+                target_channels TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -131,7 +130,7 @@ class SMMBot:
                 user_id INTEGER PRIMARY KEY,
                 posts_per_day INTEGER DEFAULT 1,
                 repost_enabled BOOLEAN DEFAULT FALSE,
-                post_times TEXT DEFAULT '["09:00"]', -- JSON array of times
+                post_times TEXT DEFAULT '["09:00"]',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -351,8 +350,8 @@ class SMMBot:
                     
                     if admin_response.status_code == 200:
                         admins = admin_response.json()['result']
-                        bot_id = f"@{bot_token.split(':')[0]}"
-                        is_admin = any(str(admin['user']['id']) == bot_token.split(':')[0] for admin in admins)
+                        bot_id = bot_token.split(':')[0]
+                        is_admin = any(str(admin['user']['id']) == bot_id for admin in admins)
                         
                         if is_admin:
                             # Save channel
@@ -963,7 +962,7 @@ def run_bot():
                 ],
                 BULK_POSTS: [
                     MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, smm_bot.handle_bulk_media),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: MAIN_MENU)  # Go back on text
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: MAIN_MENU)
                 ],
                 POSTS_PER_DAY: [
                     CallbackQueryHandler(smm_bot.handle_ppd_callback, pattern="^ppd_")
@@ -979,6 +978,7 @@ def run_bot():
         print("✅ Bot is running with your token!")
         print("🚀 Users can setup once and run forever!")
         print("🔗 Keep-alive server: http://0.0.0.0:8080")
+        print("🌐 Render URL: https://smmtggbot.onrender.com")
         
         application.run_polling(drop_pending_updates=True)
         
@@ -993,7 +993,7 @@ if __name__ == '__main__':
     print("📢 Multi-Channel Auto-Posting")
     print("🔄 Repost Mode - Infinite Loop")
     print("🎯 Complete Hands-Free Operation")
-    print("🏥 Health Check: /health on port 8080")
+    print("🏥 Health Check: https://smmtggbot.onrender.com/health")
     print("=" * 60)
     
     run_bot()
