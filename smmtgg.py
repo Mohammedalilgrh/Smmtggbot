@@ -28,10 +28,6 @@ BOT_TOKEN = "8217960293:AAEedCXGMiAHIQavwd-jpFJZqpXvRXBqCLA"
 # Conversation states
 MAIN_MENU, SETUP_BOT, SETUP_CHANNELS, BULK_POSTS, POSTS_PER_DAY = range(5)
 
-# Global bot instance
-smm_bot = None
-application = None
-
 # Flask Keep-Alive Server
 app = Flask('')
 
@@ -41,13 +37,7 @@ def home():
 
 @app.route('/health')
 def health():
-    bot_status = "running" if application else "stopped"
-    return {
-        "status": "active", 
-        "bot": bot_status,
-        "service": "SMM Auto-Post Bot",
-        "timestamp": time.time()
-    }
+    return {"status": "running", "bot": "SMM Auto-Post", "timestamp": time.time()}
 
 @app.route('/ping')
 def ping():
@@ -496,9 +486,6 @@ class SMMBot:
                 parse_mode='Markdown'
             )
             
-            # Auto-schedule if not already scheduled
-            self.schedule_user_posts(user_id)
-            
         except Exception as e:
             logger.error(f"Media processing error: {e}")
             await update.message.reply_text(
@@ -561,14 +548,10 @@ class SMMBot:
         )
         self.conn.commit()
         
-        # Reschedule posts
-        self.schedule_user_posts(user_id)
-        
         await query.edit_message_text(
             f"✅ *Posts Per Day Updated!*\n\n"
             f"📊 New setting: *{ppd} posts daily*\n\n"
-            f"Posts will be automatically distributed throughout the day.\n"
-            f"Next posts will use this frequency.",
+            f"Posts will be automatically distributed throughout the day.",
             parse_mode='Markdown'
         )
         return MAIN_MENU
@@ -657,16 +640,6 @@ class SMMBot:
         
         response_text += f"\n*Total Pending: {len(posts)} posts*"
         
-        # Add scheduling info
-        self.cursor.execute(
-            'SELECT posts_per_day FROM settings WHERE user_id = ?',
-            (user_id,)
-        )
-        ppd = self.cursor.fetchone()[0] if self.cursor.fetchone() else 1
-        
-        days_remaining = len(posts) / ppd
-        response_text += f"\n*Estimated completion: {days_remaining:.1f} days*"
-        
         await update.message.reply_text(
             response_text,
             parse_mode='Markdown',
@@ -694,9 +667,6 @@ class SMMBot:
             (new_setting, user_id)
         )
         self.conn.commit()
-        
-        status = "ON" if new_setting else "OFF"
-        status_emoji = "🟢" if new_setting else "🔴"
         
         if new_setting:
             message = (
@@ -761,237 +731,56 @@ class SMMBot:
             reply_markup=self.get_main_keyboard()
         )
         return MAIN_MENU
-    
-    def schedule_user_posts(self, user_id):
-        """Schedule posts for user"""
-        # Remove existing jobs
-        jobs = self.scheduler.get_jobs()
-        for job in jobs:
-            if job.id.startswith(f"user_{user_id}"):
-                job.remove()
-        
-        # Get user settings
-        self.cursor.execute(
-            'SELECT posts_per_day, repost_enabled FROM settings WHERE user_id = ?',
-            (user_id,)
-        )
-        result = self.cursor.fetchone()
-        if not result:
-            return
-        
-        posts_per_day, repost_enabled = result
-        
-        if posts_per_day == 0:
-            return
-        
-        # Calculate posting times (spread throughout day)
-        times = self.calculate_post_times(posts_per_day)
-        
-        # Schedule posts
-        for i, time_str in enumerate(times):
-            hour, minute = map(int, time_str.split(':'))
-            
-            trigger = CronTrigger(hour=hour, minute=minute)
-            self.scheduler.add_job(
-                self.post_scheduled_content,
-                trigger,
-                args=[user_id],
-                id=f"user_{user_id}_post_{i}",
-                replace_existing=True
-            )
-        
-        logger.info(f"Scheduled {posts_per_day} posts daily for user {user_id}")
-    
-    def calculate_post_times(self, posts_per_day):
-        """Calculate optimal posting times"""
-        if posts_per_day == 1:
-            return ["09:00"]
-        elif posts_per_day == 2:
-            return ["09:00", "17:00"]
-        elif posts_per_day == 3:
-            return ["09:00", "14:00", "19:00"]
-        elif posts_per_day == 4:
-            return ["08:00", "12:00", "16:00", "20:00"]
-        elif posts_per_day == 5:
-            return ["08:00", "11:00", "14:00", "17:00", "20:00"]
-        elif posts_per_day == 6:
-            return ["08:00", "10:30", "13:00", "15:30", "18:00", "20:30"]
-        else:  # 8-10 posts
-            return [f"{h:02d}:{m:02d}" for h in range(8, 22) for m in [0, 30]][:posts_per_day]
-    
-    def post_scheduled_content(self, user_id):
-        """Post scheduled content"""
-        try:
-            # Get next pending post
-            self.cursor.execute('''
-                SELECT id, content_type, file_id, caption, target_channels 
-                FROM posts 
-                WHERE user_id = ? AND status = 'pending' 
-                ORDER BY id LIMIT 1
-            ''', (user_id,))
-            
-            result = self.cursor.fetchone()
-            if not result:
-                # No posts left - check repost mode
-                self.handle_repost_mode(user_id)
-                return
-            
-            post_id, content_type, file_id, caption, target_channels_json = result
-            target_channels = json.loads(target_channels_json)
-            
-            # Get bot token
-            self.cursor.execute(
-                'SELECT bot_token FROM users WHERE user_id = ?',
-                (user_id,)
-            )
-            bot_result = self.cursor.fetchone()
-            if not bot_result:
-                return
-            
-            bot_token = bot_result[0]
-            
-            # Post to each target channel
-            success_count = 0
-            for channel_id in target_channels:
-                # Get channel info
-                self.cursor.execute(
-                    'SELECT channel_username FROM channels WHERE id = ? AND is_active = TRUE',
-                    (channel_id,)
-                )
-                channel_result = self.cursor.fetchone()
-                if not channel_result:
-                    continue
-                
-                channel_username = channel_result[0]
-                
-                # Post to channel
-                if self.send_to_channel(bot_token, channel_username, content_type, file_id, caption):
-                    success_count += 1
-            
-            if success_count > 0:
-                # Mark as posted
-                self.cursor.execute(
-                    'UPDATE posts SET status = "posted", posted_at = ? WHERE id = ?',
-                    (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), post_id)
-                )
-                self.conn.commit()
-                logger.info(f"Posted content {post_id} to {success_count} channels for user {user_id}")
-            
-        except Exception as e:
-            logger.error(f"Posting error for user {user_id}: {e}")
-    
-    def handle_repost_mode(self, user_id):
-        """Handle repost mode when queue is empty"""
-        try:
-            # Check if repost mode is enabled
-            self.cursor.execute(
-                'SELECT repost_enabled FROM settings WHERE user_id = ?',
-                (user_id,)
-            )
-            result = self.cursor.fetchone()
-            if not result or not result[0]:
-                return
-            
-            # Reset all posted posts to pending
-            self.cursor.execute(
-                'UPDATE posts SET status = "pending", posted_at = NULL WHERE user_id = ?',
-                (user_id,)
-            )
-            self.conn.commit()
-            
-            logger.info(f"Reset posts for repost mode - user {user_id}")
-            
-        except Exception as e:
-            logger.error(f"Repost mode error for user {user_id}: {e}")
-    
-    def send_to_channel(self, bot_token, channel_username, content_type, file_id, caption):
-        """Send content to channel"""
-        try:
-            if content_type == 'photo':
-                url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
-                payload = {
-                    "chat_id": channel_username,
-                    "photo": file_id,
-                    "caption": caption,
-                    "parse_mode": "HTML"
-                }
-            elif content_type == 'video':
-                url = f"https://api.telegram.org/bot{bot_token}/sendVideo"
-                payload = {
-                    "chat_id": channel_username,
-                    "video": file_id,
-                    "caption": caption,
-                    "parse_mode": "HTML"
-                }
-            else:  # document
-                url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-                payload = {
-                    "chat_id": channel_username,
-                    "document": file_id,
-                    "caption": caption,
-                    "parse_mode": "HTML"
-                }
-            
-            response = requests.post(url, json=payload, timeout=30)
-            return response.status_code == 200
-            
-        except Exception as e:
-            logger.error(f"Send to channel error: {e}")
-            return False
-
-def setup_bot():
-    """Setup and return the bot application"""
-    global smm_bot, application
-    
-    smm_bot = SMMBot()
-    
-    # Create application
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Add conversation handler
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', smm_bot.start)],
-        states={
-            MAIN_MENU: [
-                MessageHandler(filters.Regex('^🤖 Setup Bot Token$'), smm_bot.setup_bot_token),
-                MessageHandler(filters.Regex('^📢 Setup Channels$'), smm_bot.setup_channels),
-                MessageHandler(filters.Regex('^📤 Add Bulk Posts$'), smm_bot.add_bulk_posts),
-                MessageHandler(filters.Regex('^📊 Posts Per Day$'), smm_bot.posts_per_day),
-                MessageHandler(filters.Regex('^✅ My Posted Posts$'), smm_bot.my_posted_posts),
-                MessageHandler(filters.Regex('^⏳ Pending Posts$'), smm_bot.pending_posts),
-                MessageHandler(filters.Regex('^🔄 Repost Mode: (ON|OFF)$'), smm_bot.toggle_repost_mode),
-                MessageHandler(filters.Regex('^🎯 Target Channels$'), smm_bot.target_channels),
-            ],
-            SETUP_BOT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, smm_bot.handle_bot_token)
-            ],
-            SETUP_CHANNELS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, smm_bot.handle_channels)
-            ],
-            BULK_POSTS: [
-                MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, smm_bot.handle_bulk_media),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: asyncio.sleep(0) or MAIN_MENU)
-            ],
-            POSTS_PER_DAY: [
-                CallbackQueryHandler(smm_bot.handle_ppd_callback, pattern="^ppd_")
-            ]
-        },
-        fallbacks=[CommandHandler('start', smm_bot.start)],
-    )
-    
-    application.add_handler(conv_handler)
-    return application
 
 def run_bot():
     """Run the Telegram bot"""
     try:
-        app = setup_bot()
+        # Create bot instance
+        smm_bot = SMMBot()
+        
+        # Create application
+        application = Application.builder().token(BOT_TOKEN).build()
+        
+        # Add conversation handler
+        conv_handler = ConversationHandler(
+            entry_points=[CommandHandler('start', smm_bot.start)],
+            states={
+                MAIN_MENU: [
+                    MessageHandler(filters.Regex('^🤖 Setup Bot Token$'), smm_bot.setup_bot_token),
+                    MessageHandler(filters.Regex('^📢 Setup Channels$'), smm_bot.setup_channels),
+                    MessageHandler(filters.Regex('^📤 Add Bulk Posts$'), smm_bot.add_bulk_posts),
+                    MessageHandler(filters.Regex('^📊 Posts Per Day$'), smm_bot.posts_per_day),
+                    MessageHandler(filters.Regex('^✅ My Posted Posts$'), smm_bot.my_posted_posts),
+                    MessageHandler(filters.Regex('^⏳ Pending Posts$'), smm_bot.pending_posts),
+                    MessageHandler(filters.Regex('^🔄 Repost Mode: (ON|OFF)$'), smm_bot.toggle_repost_mode),
+                    MessageHandler(filters.Regex('^🎯 Target Channels$'), smm_bot.target_channels),
+                ],
+                SETUP_BOT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, smm_bot.handle_bot_token)
+                ],
+                SETUP_CHANNELS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, smm_bot.handle_channels)
+                ],
+                BULK_POSTS: [
+                    MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, smm_bot.handle_bulk_media),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: MAIN_MENU)
+                ],
+                POSTS_PER_DAY: [
+                    CallbackQueryHandler(smm_bot.handle_ppd_callback, pattern="^ppd_")
+                ]
+            },
+            fallbacks=[CommandHandler('start', smm_bot.start)],
+        )
+        
+        application.add_handler(conv_handler)
+        
         print("🤖 Starting Telegram Bot...")
-        app.run_polling()
+        application.run_polling(drop_pending_updates=True)
+        
     except Exception as e:
         print(f"❌ Bot error: {e}")
-        # Try to restart after 10 seconds
-        time.sleep(10)
+        print("🔄 Restarting in 5 seconds...")
+        time.sleep(5)
         run_bot()
 
 def main():
@@ -1009,17 +798,8 @@ def main():
     keep_alive()
     start_self_ping()
     
-    # Start Telegram bot in a separate thread
-    bot_thread = Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    print("✅ Telegram Bot started in background thread")
-    
-    # Keep the main thread alive
-    try:
-        while True:
-            time.sleep(3600)  # Sleep for 1 hour
-    except KeyboardInterrupt:
-        print("🛑 Bot stopped by user")
+    # Start Telegram bot
+    run_bot()
 
 if __name__ == '__main__':
     main()
