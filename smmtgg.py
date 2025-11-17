@@ -930,65 +930,65 @@ class SMMBot:
             logger.error(f"Send to channel error: {e}")
             return False
 
-async def main():
-    """Main async function to run the bot"""
-    try:
-        # Start keep-alive server first
-        keep_alive()
-        start_self_ping()
-        
-        smm_bot = SMMBot()
-        
-        # Create application
-        application = Application.builder().token(BOT_TOKEN).build()
-        
-        # Add conversation handler
-        conv_handler = ConversationHandler(
-            entry_points=[CommandHandler('start', smm_bot.start)],
-            states={
-                MAIN_MENU: [
-                    MessageHandler(filters.Regex('^🤖 Setup Bot Token$'), smm_bot.setup_bot_token),
-                    MessageHandler(filters.Regex('^📢 Setup Channels$'), smm_bot.setup_channels),
-                    MessageHandler(filters.Regex('^📤 Add Bulk Posts$'), smm_bot.add_bulk_posts),
-                    MessageHandler(filters.Regex('^📊 Posts Per Day$'), smm_bot.posts_per_day),
-                    MessageHandler(filters.Regex('^✅ My Posted Posts$'), smm_bot.my_posted_posts),
-                    MessageHandler(filters.Regex('^⏳ Pending Posts$'), smm_bot.pending_posts),
-                    MessageHandler(filters.Regex('^🔄 Repost Mode: (ON|OFF)$'), smm_bot.toggle_repost_mode),
-                    MessageHandler(filters.Regex('^🎯 Target Channels$'), smm_bot.target_channels),
-                ],
-                SETUP_BOT: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, smm_bot.handle_bot_token)
-                ],
-                SETUP_CHANNELS: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, smm_bot.handle_channels)
-                ],
-                BULK_POSTS: [
-                    MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, smm_bot.handle_bulk_media),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: asyncio.sleep(0) or MAIN_MENU)
-                ],
-                POSTS_PER_DAY: [
-                    CallbackQueryHandler(smm_bot.handle_ppd_callback, pattern="^ppd_")
-                ]
-            },
-            fallbacks=[CommandHandler('start', smm_bot.start)],
-        )
-        
-        application.add_handler(conv_handler)
-        
-        print("🤖 SMM Auto-Post Master Starting...")
-        print("✅ Bot is running with your token!")
-        print("🚀 Users can setup once and run forever!")
-        print("🔗 Keep-alive server: http://0.0.0.0:8080")
-        print("🌐 Render URL: https://smmtggbot.onrender.com")
-        
-        # Start the bot
-        await application.run_polling()
-        
-    except Exception as e:
-        print(f"❌ Bot error: {e}")
-        raise
+def run_telegram_bot():
+    """Run Telegram bot in a separate thread"""
+    async def main():
+        try:
+            smm_bot = SMMBot()
+            
+            # Create application
+            application = Application.builder().token(BOT_TOKEN).build()
+            
+            # Add conversation handler
+            conv_handler = ConversationHandler(
+                entry_points=[CommandHandler('start', smm_bot.start)],
+                states={
+                    MAIN_MENU: [
+                        MessageHandler(filters.Regex('^🤖 Setup Bot Token$'), smm_bot.setup_bot_token),
+                        MessageHandler(filters.Regex('^📢 Setup Channels$'), smm_bot.setup_channels),
+                        MessageHandler(filters.Regex('^📤 Add Bulk Posts$'), smm_bot.add_bulk_posts),
+                        MessageHandler(filters.Regex('^📊 Posts Per Day$'), smm_bot.posts_per_day),
+                        MessageHandler(filters.Regex('^✅ My Posted Posts$'), smm_bot.my_posted_posts),
+                        MessageHandler(filters.Regex('^⏳ Pending Posts$'), smm_bot.pending_posts),
+                        MessageHandler(filters.Regex('^🔄 Repost Mode: (ON|OFF)$'), smm_bot.toggle_repost_mode),
+                        MessageHandler(filters.Regex('^🎯 Target Channels$'), smm_bot.target_channels),
+                    ],
+                    SETUP_BOT: [
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, smm_bot.handle_bot_token)
+                    ],
+                    SETUP_CHANNELS: [
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, smm_bot.handle_channels)
+                    ],
+                    BULK_POSTS: [
+                        MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, smm_bot.handle_bulk_media),
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: asyncio.sleep(0) or MAIN_MENU)
+                    ],
+                    POSTS_PER_DAY: [
+                        CallbackQueryHandler(smm_bot.handle_ppd_callback, pattern="^ppd_")
+                    ]
+                },
+                fallbacks=[CommandHandler('start', smm_bot.start)],
+            )
+            
+            application.add_handler(conv_handler)
+            
+            print("🤖 Telegram Bot Starting...")
+            await application.run_polling()
+            
+        except Exception as e:
+            print(f"❌ Telegram Bot error: {e}")
+            raise
 
-if __name__ == '__main__':
+    # Run in a separate thread to avoid event loop conflicts
+    def start_bot():
+        asyncio.run(main())
+    
+    bot_thread = Thread(target=start_bot, daemon=True)
+    bot_thread.start()
+    print("✅ Telegram Bot started in separate thread")
+
+def main():
+    """Main function to start everything"""
     print("=" * 60)
     print("🤖 SMM AUTO-POST MASTER - SETUP ONCE, RUN FOREVER!")
     print(f"🔐 Using Bot Token: {BOT_TOKEN[:10]}...")
@@ -998,5 +998,19 @@ if __name__ == '__main__':
     print("🏥 Health Check: https://smmtggbot.onrender.com/health")
     print("=" * 60)
     
-    # Run the bot
-    asyncio.run(main())
+    # Start keep-alive server
+    keep_alive()
+    start_self_ping()
+    
+    # Start Telegram bot
+    run_telegram_bot()
+    
+    # Keep the main thread alive
+    try:
+        while True:
+            time.sleep(3600)  # Sleep for 1 hour
+    except KeyboardInterrupt:
+        print("🛑 Bot stopped by user")
+
+if __name__ == '__main__':
+    main()
